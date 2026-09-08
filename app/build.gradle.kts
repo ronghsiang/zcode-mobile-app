@@ -93,6 +93,7 @@ dependencies {
 
     // Unit & instrumented tests
     testImplementation(libs.junit)
+    testImplementation(libs.json)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 }
