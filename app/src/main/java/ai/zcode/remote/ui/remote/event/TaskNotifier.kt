@@ -151,7 +151,10 @@ object TaskNotifier {
 
     private fun post(record: TaskNotificationInbox.Record, context: Context): ConsumeResult {
         val event = record.event
-        if (isInteraction(event) && event.taskId.isNotEmpty() &&
+        // 用户正停留在某任务会话页时，该会话自身的消息（审批/提问/完成/失败）
+        // 已在页面上实时可见，弹系统通知属于打扰 → 抑制；其他会话的消息不受
+        // 影响照常通知。RESOLVED 不经过这里（notify 入口已分流）。
+        if (event.taskId.isNotEmpty() &&
             RemoteControlActivity.isForegroundSession(event.taskId)
         ) return ConsumeResult.DISCARDED
         val settings = AppSettingsRepository.getInstance(context)
