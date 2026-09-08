@@ -556,6 +556,7 @@ object TaskEventParser {
         val description = pending?.let { firstString(it, "description", "summary") }
         val lastActivityAt = firstLong(activity, "lastActivityAt", "last_activity_at")
             ?: firstLong(meta, "updatedAt", "updated_at", "lastActivityAt")
+            ?: firstLong(task, "updatedAt", "updated_at", "lastActivityAt")
         return TaskSessionTracker.SessionState(
             sessionId = id,
             title = firstString(meta, "title") ?: firstString(task, "title"),
@@ -598,6 +599,7 @@ object TaskEventParser {
             description = pending?.let { firstString(it, "description", "summary") },
             interactionId = pending?.let { firstString(it, "interactionId", "interaction_id") },
             lastActivityAt = firstLong(task, "lastActivityAt", "last_activity_at")
+                ?: firstLong(task, "updatedAt", "updated_at")
                 ?: firstLong(activity, "lastActivityAt", "last_activity_at"),
             createdAt = firstLong(task, "createdAt", "created_at")
                 ?: firstLong(meta, "createdAt", "created_at"),

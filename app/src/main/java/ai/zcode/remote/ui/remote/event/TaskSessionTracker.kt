@@ -50,9 +50,16 @@ internal class TaskSessionTracker {
 
         for (patch in incoming) {
             val prev = source.sessions[patch.sessionId]
+            // 终态后任务被重新激活（失败/完成后用户再次发起，复用同一 sessionId，
+            // 索引条目从 error/completed 回到 running 且活动时间戳更新）时，
+            // 必须放行让状态回到 running，否则第二次终态不会产生新事件。
+            // 用 patch 的原始时间戳判断，避免 mergeWith 清空 lastActivityAt
+            // 导致无法区分“重新激活”与“迟到的旧 running 帧”。
+            val reactivated = prev?.phase in TERMINAL_PHASES && patch.phase == "running" &&
+                patch.patchNewerThan(prev)
             // 同一 wire frame 里可能同时有 session 引用、局部 delta 与完整 upsert。
             // 按字段合并，既避免局部 delta 清空待处理数量，也让后面的完整状态覆盖前面。
-            val next = patch.mergeWith(prev)
+            val next = if (reactivated) patch.copy(phase = "running") else patch.mergeWith(prev)
             source.sessions[next.sessionId] = next
             val prevPerm = prev?.permissionCount ?: 0
             val prevInput = prev?.userInputCount ?: 0
@@ -122,6 +129,11 @@ internal class TaskSessionTracker {
     private fun SessionState.mergeWith(previous: SessionState?): SessionState {
         // 同一任务的任务索引、会话索引会异步到达。终态已确认后，迟到的 running
         // 不能把它写回运行中；否则下一份 completed 会被误判为一次新完成并重复通知。
+        // 但任务失败/完成后用户重新发起会复用同一 sessionId（同一索引条目从
+        // error 回到 running），若一律压回终态，第二次失败时 prev 仍是 error，
+        // 状态机不产生新的 TASK_FAILED —— 表现为“同一任务第二次失败不通知”。
+        // 判别依据：新帧携带更新的 lastActivityAt（updatedAt）时视为重新激活，
+        // 允许状态回到 running；时间戳相同或缺失的迟到帧仍被压回终态去重。
         val mergedPhase = when {
             previous?.phase in TERMINAL_PHASES && phase !in TERMINAL_PHASES -> previous?.phase
             phase != null -> phase
@@ -144,11 +156,21 @@ internal class TaskSessionTracker {
             // 收到明确的 0 待处理数时，上一次交互已经结束；不能把旧 interactionId
             // 带入下一次审批，否则缺少 ID 的新交互会与旧事件键冲突。
             interactionId = if (hasPendingInteraction) interactionId ?: previous?.interactionId else null,
-            // lastActivityAt 在这里作为无 interactionId 时的交互版本。交互归零后
-            // 必须清空，不能让下一次审批继承上一轮版本。
-            lastActivityAt = if (hasPendingInteraction) lastActivityAt ?: previous?.lastActivityAt else null,
+            // lastActivityAt 是任务的活动时间（updatedAt/lastActivityAt），
+            // 始终保留最新值：它既作为审批无 interactionId 时的兜底版本，
+            // 也用于判断终态后任务是否被重新激活（error→running 新一轮执行）。
+            // 交互归零时只清 interactionId，不清 lastActivityAt——审批的
+            // RESOLVED 事件键由 lastRequestKeyBySession 配对，不受影响。
+            lastActivityAt = lastActivityAt ?: previous?.lastActivityAt,
             createdAt = createdAt ?: previous?.createdAt,
         )
+    }
+
+    /** 当前 patch 是否比上一份快照更新（依据活动时间戳，缺失时视为不更新）。 */
+    private fun SessionState.patchNewerThan(previous: SessionState?): Boolean {
+        val prevStamp = previous?.lastActivityAt ?: previous?.createdAt ?: return false
+        val patchStamp = lastActivityAt ?: createdAt ?: return false
+        return patchStamp > prevStamp
     }
 
     private fun isSuccessfulTerminal(state: SessionState): Boolean =

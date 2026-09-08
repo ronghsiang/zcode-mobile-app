@@ -209,8 +209,58 @@ class TaskSessionTrackerTest {
             "设备 A",
         ).single()
 
-        assertEquals(TaskEventParser.TaskEvent.Type.RESOLVED, firstResolved.type)
-        assertEquals(first.eventKey, firstResolved.eventKey)
+       assertEquals(TaskEventParser.TaskEvent.Type.RESOLVED, firstResolved.type)
+       assertEquals(first.eventKey, firstResolved.eventKey)
+       assertTrue(first.eventKey != second.eventKey)
+   }
+
+    @Test
+    fun `task reactivated after error emits a second failure with distinct key`() {
+        val tracker = TaskSessionTracker()
+        tracker.update("connection-a", listOf(state("task", "running").copy(lastActivityAt = 100L)), "设备 A")
+        val first = tracker.update(
+            "connection-a",
+            listOf(state("task", "error").copy(lastActivityAt = 200L)),
+            "设备 A",
+        ).single()
+        // 失败后用户重新发起：running 带更新的活动时间戳
+        tracker.update(
+            "connection-a",
+            listOf(state("task", "running").copy(lastActivityAt = 300L)),
+            "设备 A",
+        )
+        val second = tracker.update(
+            "connection-a",
+            listOf(state("task", "error").copy(lastActivityAt = 400L)),
+            "设备 A",
+        ).single()
+
+        assertEquals(TaskEventParser.TaskEvent.Type.TASK_FAILED, first.type)
+        assertEquals(TaskEventParser.TaskEvent.Type.TASK_FAILED, second.type)
         assertTrue(first.eventKey != second.eventKey)
+    }
+
+    @Test
+    fun `stale running frame after terminal cannot reopen task`() {
+        val tracker = TaskSessionTracker()
+        tracker.update("connection-a", listOf(state("task", "running").copy(lastActivityAt = 100L)), "设备 A")
+        tracker.update(
+            "connection-a",
+            listOf(state("task", "error").copy(lastActivityAt = 200L)),
+            "设备 A",
+        )
+        // 迟到的旧 running 帧（时间戳不更新）不能把终态写回运行中
+        val stale = tracker.update(
+            "connection-a",
+            listOf(state("task", "running").copy(lastActivityAt = 200L)),
+            "设备 A",
+        )
+        val repeated = tracker.update(
+            "connection-a",
+            listOf(state("task", "error").copy(lastActivityAt = 200L)),
+            "设备 A",
+        )
+        assertTrue(stale.isEmpty())
+        assertTrue(repeated.isEmpty())
     }
 }
