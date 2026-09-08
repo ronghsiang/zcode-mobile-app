@@ -406,11 +406,8 @@ class ZCodeWebViewClient(
                 font-size: 12px !important;
                 line-height: 18px !important;
             }
-            /* 弹层默认右缘贴死屏幕边缘（x=92 宽 320 @视口 412），整体左移 46px 后
-               水平居中、左右留白均衡；transform 无需与浮层 wrapper 的 inline 定位耦合 */
-            div[data-slot="hover-card-content"] {
-                transform: translateX(-46px) !important;
-            }
+            /* 水平居中改由 JS 动态计算（见下方第 6 节），
+               这里不再用固定 -46px —— 不同视口/弹层宽度下不适用 */
 
             /* 思考等级与权限控制使用 Radix Select listbox；
                统一字体大小与模型选择列表一致（主标题 12px/16px，副描述 10.5px/14px）；
@@ -1095,7 +1092,79 @@ aside[class*="min-w-0"] nav {
                         }
                     }
                 }, true);
-            })();
+
+                // 6. 「上下文容量」HoverCard 动态水平居中。
+                // 远端 Radix Popper 结构：外层 [data-radix-popper-content-wrapper]
+                // 是 0×0 的 fixed 容器（transform: translate(x,y)），卡片是其普通
+                // 子元素并直接溢出显示。Radix 按页面默认视口计算 x，窄屏/宽屏时
+                // 卡片会贴右或贴左；固定 translateX 只适配单一屏幕。
+                // 正确做法：不修改卡片定位（改 card 为 position:fixed 会被外层
+                // transform 变成包含块，top 会被推到几千像素，实测踩坑），只把
+                // 外层 wrapper 的 translateX 重算为“视口中心 - 卡片半宽 - 卡片在
+                // wrapper 内的水平偏移”，Y 保留 Radix 值。首次设置后 Radix 每次
+                // 改 style 都会被监听，因此定位被 Radix 覆盖时能自动恢复。
+                // ⚠️ 注入时序：injectAntiMisoperation 在 onPageStarted 就可能执行，
+                // 此时 document.body 尚未创建，MutationObserver.observe(document.body)
+                // 会直接抛错。若先置全局标记再安装，真机慢加载时 onPageFinished 的
+                // 重注会被标记跳过，整段居中逻辑从未安装 —— 模拟器 body 出现快所以
+                // 不报，真机因此不居中（2026-09-08 实测）。
+                function installCapacityCardCenter() {
+                    if (window.__zcodeCapacityCardCenterInstalled) return;
+                    // 等 documentElement/body 就绪后再安装；失败不能提前置标记
+                    if (!document.documentElement || !document.body) {
+                        setTimeout(installCapacityCardCenter, 120);
+                        return;
+                    }
+                    window.__zcodeCapacityCardCenterInstalled = true;
+
+                    var capacityCardRAF = null;
+                    var capacityCentering = false;
+                    function centerCapacityCard(card) {
+                        if (!card || !card.isConnected) return;
+                        var text = (card.innerText || card.textContent || '');
+                        if (text.indexOf('上下文容量') === -1) return;
+                        var wrapper = card.closest('[data-radix-popper-content-wrapper]');
+                        if (!wrapper || !wrapper.isConnected) return;
+                        var cardRect = card.getBoundingClientRect();
+                        var wrapperRect = wrapper.getBoundingClientRect();
+                        // Radix 尚未完成定位或卡片还没渲染出宽度时，等下一轮
+                        if (!cardRect.width || (cardRect.left === 0 && cardRect.top === 0)) return;
+                        // 以“实际渲染中心”判断，不能只看上次目标值：弹层打开后 Radix
+                        // 可能再次重设 transform，若只比较缓存的目标 X 会误判“已居中”
+                        // 而跳过本次校正（真机稳定后仍偏的原因）。
+                        var currentCenter = cardRect.left + cardRect.width / 2;
+                        if (Math.abs(currentCenter - innerWidth / 2) < 0.5) return;
+                        var offsetX = cardRect.left - wrapperRect.left;
+                        var targetX = innerWidth / 2 - cardRect.width / 2 - offsetX;
+                        capacityCentering = true;
+                        // Y 必须保留 wrapper 当前视口位置，不能写死
+                        wrapper.style.transform = 'translate(' + targetX + 'px,' + wrapperRect.top + 'px)';
+                        capacityCentering = false;
+                    }
+                    function scanCapacityCards() {
+                        var cards = document.querySelectorAll('[data-slot="hover-card-content"]');
+                        for (var i = 0; i < cards.length; i++) centerCapacityCard(cards[i]);
+                    }
+                    new MutationObserver(function() {
+                        // 自己设置 wrapper.transform 也会触发；忽略自身改动避免死循环
+                        if (capacityCentering) return;
+                        if (capacityCardRAF) return;
+                        capacityCardRAF = requestAnimationFrame(function() {
+                            capacityCardRAF = null;
+                            scanCapacityCards();
+                        });
+                    }).observe(document.documentElement, {
+                        childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'data-state']
+                    });
+                    // Radix 定位/屏幕宽变化后重新计算
+                    window.addEventListener('resize', scanCapacityCards);
+                    window.addEventListener('orientationchange', scanCapacityCards);
+                    try { screen.addEventListener('change', scanCapacityCards); } catch(e) {}
+                    // 页面刚注入时若有已打开/残留的卡，先校正一次
+                    scanCapacityCards();
+                }
+                installCapacityCardCenter();
+                })();
         """.trimIndent()
 
         webView.evaluateJavascript(js, null)
