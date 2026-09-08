@@ -13,7 +13,8 @@ import ai.zcode.remote.ui.remote.event.TaskEventBridge
 class ZCodeWebViewClient(
     private val onPageStart: () -> Unit,
     private val onPageFinish: (url: String) -> Unit,
-    private val onPageError: (errorCode: Int, description: String) -> Unit
+    private val onPageError: (errorCode: Int, description: String) -> Unit,
+    private val onRenderProcessGone: () -> Unit,
 ) : WebViewClient() {
 
     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
@@ -56,10 +57,12 @@ class ZCodeWebViewClient(
         view.evaluateJavascript(EventCaptureScript.build(TaskEventBridge.BRIDGE_NAME), null)
     }
 
+    @androidx.annotation.RequiresApi(26)
     override fun onRenderProcessGone(view: WebView?, detail: android.webkit.RenderProcessGoneDetail?): Boolean {
         val didCrash = detail?.didCrash() == true
         android.util.Log.e("ZCodeWeb", "onRenderProcessGone: didCrash=$didCrash")
-        onPageError(-100, if (didCrash) "页面渲染进程异常，请点击重试" else "系统内存不足回收了页面，请点击重试")
+        onPageError(-100, if (didCrash) "页面渲染进程异常，正在重新连接" else "系统回收了页面，正在重新连接")
+        onRenderProcessGone()
         return true
     }
 
