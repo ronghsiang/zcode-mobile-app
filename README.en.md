@@ -30,6 +30,7 @@ ZCode Mobile App wraps the official remote control page in a native shell: it us
 - **Session memory:** Remembers the last task session per device and restores that device and session after switching back or after the process is reclaimed by the system.
 - **In-app updates:** Silently checks GitHub Releases on startup, downloads the APK and launches the system installer, with an option to ignore a specific version.
 - **Connection management:** Add remote devices quickly via four entry points (QR scan, gallery recognition, clipboard detection, and deep links), with unified management of multiple connections and sorting support.
+- **New-version adaptation:** Automatically loads the latest cloud page build (app_version=latest) when opening the remote page — no re-scan needed after a desktop upgrade. Verified on real devices against ZCode 3.14.x.
 - **Mobile interaction:** Immersive full screen, narrow-screen adaptation, mis-touch suppression, settings UI optimization, staged back-key handling, and auto-raising the page when the soft keyboard appears, for a better experience.
 - **Background keep-alive:** Keeps the connection alive with a foreground service plus a screen-off `WakeLock` during remote sessions, preventing the page from being reclaimed by the system, and provides battery optimization guidance.
 
