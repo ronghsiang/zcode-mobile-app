@@ -44,6 +44,7 @@ class RemoteControlActivity : AppCompatActivity() {
     private var targetUrl: String = ""
     /** 实际加载用 URL：targetUrl 改写 app_version=latest 后的产物，仅用于加载与事件源交接。 */
     private var pageUrl: String = ""
+    private val recoveryFaultMonitor = RecoveryFaultMonitor()
     private var deviceName: String = "ZCode 远程工作区"
     private var pendingTaskId: String = ""
     private var connectionId: String = ""
@@ -371,8 +372,19 @@ class RemoteControlActivity : AppCompatActivity() {
                 binding.progressBar.progress = progress
                 if (progress >= 100) {
                     binding.progressBar.visibility = View.GONE
+                    recoveryFaultMonitor.onPageLoad()
                 } else {
                     binding.progressBar.visibility = View.VISIBLE
+                }
+            },
+            onRecoveryFaultDetected = { message ->
+                // 页面订阅恢复失败是页内终态，整页重载是唯一可靠恢复手段；
+                // 冷却/熔断由 monitor 决策，避免服务端未恢复时无限刷新。
+                if (recoveryFaultMonitor.onConsoleMessage(
+                        message, android.os.SystemClock.elapsedRealtime())
+                ) {
+                    android.util.Log.w("ZCodeWeb", "subscription recovery fault -> full page reload")
+                    loadUrl(pageUrl)
                 }
             },
             onTitleReceived = { title ->
