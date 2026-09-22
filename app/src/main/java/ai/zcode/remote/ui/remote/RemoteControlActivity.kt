@@ -42,6 +42,8 @@ class RemoteControlActivity : AppCompatActivity() {
     private lateinit var binding: ActivityRemoteControlBinding
     private lateinit var appSettings: AppSettingsRepository
     private var targetUrl: String = ""
+    /** 实际加载用 URL：targetUrl 改写 app_version=latest 后的产物，仅用于加载与事件源交接。 */
+    private var pageUrl: String = ""
     private var deviceName: String = "ZCode 远程工作区"
     private var pendingTaskId: String = ""
     private var connectionId: String = ""
@@ -83,7 +85,7 @@ class RemoteControlActivity : AppCompatActivity() {
         lastReconnectAtElapsedMs = android.os.SystemClock.elapsedRealtime()
         android.util.Log.i("ZCodeWeb", "reload for reconnect: attempt=$reconnectAttempt")
         binding.layoutErrorOverlay.visibility = View.GONE
-        loadUrl(targetUrl)
+        loadUrl(pageUrl)
     }
 
 
@@ -119,6 +121,7 @@ class RemoteControlActivity : AppCompatActivity() {
         isFullscreen = appSettings.isFullscreenEnabled()
 
         targetUrl = intent.getStringExtra(EXTRA_URL) ?: ""
+        pageUrl = RemotePageUrl.withLatestPageBuild(targetUrl)
         deviceName = intent.getStringExtra(EXTRA_NAME) ?: "ZCode 远程工作区"
         pendingTaskId = intent.getStringExtra(EXTRA_TASK_ID) ?: ""
         isSettingsModeRequested = intent.getBooleanExtra(EXTRA_SETTINGS_MODE, false)
@@ -145,7 +148,7 @@ class RemoteControlActivity : AppCompatActivity() {
         // 确保本 Activity 是唯一连接远端的控制端，避免“连接被占用”。
         ai.zcode.remote.service.KeepAliveService.acquireEventSource(
             this,
-            url = targetUrl,
+            url = pageUrl,
             name = deviceName,
             sourceId = connectionId.ifEmpty { targetUrl },
         )
@@ -170,7 +173,7 @@ class RemoteControlActivity : AppCompatActivity() {
 
         setupEventCapture()
         registerNetworkCallback()
-        loadUrl(targetUrl)
+        loadUrl(pageUrl)
     }
 
     /** 注册任务事件桥并在每次页面加载后注入捕获脚本（SPA 导航可能重建 window）。 */
@@ -394,7 +397,7 @@ class RemoteControlActivity : AppCompatActivity() {
 
         binding.btnRetry.setOnClickListener {
             binding.layoutErrorOverlay.visibility = View.GONE
-            loadUrl(targetUrl)
+            loadUrl(pageUrl)
         }
     }
 
@@ -756,6 +759,7 @@ class RemoteControlActivity : AppCompatActivity() {
         saveCurrentTaskId()
         // 更新连接信息并重新加载
         targetUrl = newUrl
+        pageUrl = RemotePageUrl.withLatestPageBuild(newUrl)
         deviceName = newName
         pendingTaskId = newTaskId
         val repo = ConnectionRepository.getInstance(this)
@@ -767,13 +771,13 @@ class RemoteControlActivity : AppCompatActivity() {
         // 不创建隐藏监听；本页销毁后才按新 URL 接管。
         ai.zcode.remote.service.KeepAliveService.acquireEventSource(
             this,
-            url = targetUrl,
+            url = pageUrl,
             name = deviceName,
             sourceId = connectionId.ifEmpty { targetUrl },
         )
         setupEventCapture()
         // 重新加载页面
-        loadUrl(targetUrl)
+        loadUrl(pageUrl)
     }
 
     override fun onResume() {
@@ -888,7 +892,7 @@ class RemoteControlActivity : AppCompatActivity() {
         // 填补 Activity WebView 销毁后的监听空窗（服务内部保证与主页面不并存）。
         ai.zcode.remote.service.KeepAliveService.releaseEventSource(
             this,
-            url = targetUrl,
+            url = pageUrl,
             name = deviceName,
             sourceId = connectionId.ifEmpty { targetUrl },
         )
@@ -919,7 +923,7 @@ class RemoteControlActivity : AppCompatActivity() {
             return
         }
         eventSourceHandedOver = true
-        val url = targetUrl
+        val url = pageUrl
         val name = deviceName
         val sourceId = connectionId.ifEmpty { url }
         android.util.Log.w("ZCodeWeb", "handover event source to keep-alive: reason=$reason")
